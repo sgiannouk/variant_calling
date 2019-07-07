@@ -13,8 +13,8 @@ fastQscreen_config = "/home/stavros/playground/progs/16S_subsidiary_files/fastq_
 refGenome_GRCh38 = "/home/stavros/playground/progs/reference_files/reference_genome/GRCh38_primAssembly/GRCh38_primary_assembly_genome.fa"
 reference_annotation_gtf = "/home/stavros/playground/progs/reference_files/gene_annotation/gencode.v29.primary_assembly.annotation.gtf"
 reference_annotation_bed = "/home/stavros/playground/progs/reference_files/gene_annotation/hg38_Gencode_V28.bed"
-gatk_knownsites = "/home/stavros/playground/progs/reference_files/gatk_knownsites"
-
+gatk_subfiles = "/home/stavros/playground/progs/reference_files/gatk_subfiles"
+gatk_liftover_GRCh38 = "/home/stavros/playground/progs/reference_files/gatk_subfiles/liftover_GRCh38/gnomad.exomes.r2.1.1.sites.liftover_grch38.vcf.bgz"
 
 usage = "variant_calling [options]"
 epilog = " -- June 2019 | Stavros Giannoukakos -- "
@@ -57,7 +57,6 @@ varcall_dir = os.path.join(analysis_dir, "variant_calling")
 
 
 def quality_control():
-
 	if not os.path.exists(prereports_dir): os.makedirs(prereports_dir)
 	if not os.path.exists(preprocesed_dir): os.makedirs(preprocesed_dir)
 	if not os.path.exists(temp): os.makedirs(temp)
@@ -293,13 +292,13 @@ def post_processing():
 		subprocess.run(ref_dict, shell=True)
 
 	# Phred score recalibration
-	known_sites = [f for f in glob.glob("{0}/*.vcf.gz".format(gatk_knownsites))]
+	known_sites = [f for f in glob.glob("{0}/known_sites/*.vcf.gz".format(gatk_subfiles))]
 	print("gatk BaseRecalibrator 1 - Base Quality Score Recalibration: in progress ..")
 	preBaseRecalibrator = " ".join([
 	"gatk BaseRecalibrator",  # Call gatk MarkDuplicates(v4.1.2.0)
 	"--input", "{0}/concat_samples.bam".format(postprocesed_dir),
 	"--reference", refGenome_GRCh38,
-	"--output", "{0}/pre_recal_data.table".format(postprocesed_dir),
+	"--output", "{0}/recal_data.table".format(postprocesed_dir),
 	"--known-sites", known_sites[0],  # databases of known polymorphic sites
 	"--known-sites", known_sites[1],  # databases of known polymorphic sites
 	"--known-sites", known_sites[2],  # databases of known polymorphic sites
@@ -311,7 +310,7 @@ def post_processing():
 	applyBQSR = " ".join([
 	"gatk ApplyBQSR",  # Call gatk ApplyBQSR (v4.1.2.0)
 	"--input", "{0}/concat_samples.bam".format(postprocesed_dir),
-	"--bqsr-recal-file", "{0}/pre_recal_data.table".format(postprocesed_dir),
+	"--bqsr-recal-file", "{0}/recal_data.table".format(postprocesed_dir),
 	"--output", "{0}/recalibrated_concat_samples.bam".format(postprocesed_dir),	
 	"2>>", os.path.join(postreports_dir, "applyBQSR_report.txt")])
 	subprocess.run(applyBQSR, shell=True)
@@ -322,7 +321,7 @@ def post_processing():
 	"gatk BaseRecalibrator",  # Call gatk MarkDuplicates(v4.1.2.0)
 	"--input", "{0}/recalibrated_concat_samples.bam".format(postprocesed_dir),
 	"--reference", refGenome_GRCh38,
-	"--output", "{0}/after_recal_data.table".format(postprocesed_dir),
+	"--output", "{0}/post_recal_data.table".format(postprocesed_dir),
 	"--known-sites", known_sites[0],  # databases of known polymorphic sites
 	"--known-sites", known_sites[1],  # databases of known polymorphic sites
 	"--known-sites", known_sites[2],  # databases of known polymorphic sites
@@ -333,8 +332,8 @@ def post_processing():
 	print("gatk analyzeCovariates - Evaluate and compare base quality score recalibration: in progress ..")
 	analyzeCovariates = " ".join([
 	"gatk AnalyzeCovariates",  # Call gatk ApplyBQSR (v4.1.2.0)
-	"--before-report-file", "{0}/pre_recal_data.table".format(postprocesed_dir),
-	"--after-report-file", "{0}/after_recal_data.table".format(postprocesed_dir),
+	"--before-report-file", "{0}/recal_data.table".format(postprocesed_dir),
+	"--after-report-file", "{0}/post_recal_data.table".format(postprocesed_dir),
 	"--intermediate-csv-file", "{0}/concat_recal_samples_BQSR.csv".format(postreports_dir),	
 	"--plots-report-file", "{0}/concat_recal_samples_BQSR.pdf".format(postreports_dir),	
 	"2>>", os.path.join(postreports_dir, "analyzeCovariates_report.txt")])
@@ -344,81 +343,106 @@ def post_processing():
 	os.system('rm {0}/*data.table'.format(postreports_dir))
 	return
 
-def variant_calling():
+def calling_variants():
 	print("CALLING VARIANTS")
-	# if not os.path.exists(varcall_dir): os.makedirs(varcall_dir)
-	# aligned_data = glob.glob("{0}/*.qt.genome.bam".format(alignment_dir))
+	if not os.path.exists(varcall_dir): os.makedirs(varcall_dir)
+
+	### CALL CANDIDATE VARIANTS
+	## 1. Run MuTect2 using only tumor sample on chromosome level
+	print("1/6 | Mutect2 - Call somatic SNVs and indels via local assembly of haplotypes: in progress ..")
+	mutect2 = " ".join([
+	"gatk Mutect2",
+	"--reference", refGenome_GRCh38,
+	"--germline-resource", gatk_liftover_GRCh38,
+	"--f1r2-tar-gz", "{0}/f1r2.tar.gz".format(varcall_dir),
+	"--native-pair-hmm-threads", args.threads,
+	"--input", "{0}/recalibrated_concat_samples.bam".format(postprocesed_dir),
+	"--output", "{0}/variants.vcf".format(varcall_dir),
+	# "2>>", os.path.join(postreports_dir, "mutect2_report.txt")
+	])
+	subprocess.run(mutect2, shell=True)
+
+
+	### CALCULATE CONTAMINATION
+	## 2. Summarizes counts of reads that support reference, alternate and other
+	## alleles for given sites. Results can be used with CalculateContamination.
+	print("2/6 | GetPileupSummaries - Generating pileup summaries on tumor samples: in progress ..")
+	GetPileupSummaries = " ".join([
+	"gatk GetPileupSummaries",
+	"--input", "{0}/recalibrated_concat_samples.bam".format(postprocesed_dir),
+	"--output", "{0}/pileups.table".format(varcall_dir),
+	"--variant", gatk_liftover_GRCh38,  # Germline reference from gnomad
+	"--intervals", gatk_liftover_GRCh38,  # Genomic intervals over which to operate
+	# "2>>", os.path.join(postreports_dir, "getPileupSummaries_report.txt")
+	])
+	subprocess.run(GetPileupSummaries, shell=True)
+
+	## 3. Calculates the fraction of reads coming from cross-sample contamination,
+	## given results from GetPileupSummaries. The resulting contamination table is
+	## used with FilterMutectCalls.
+	print("3/6 | CalculateContamination - Calculate contamination on tumor samples: in progress ..")
+	calculateContamination = " ".join([
+	"gatk CalculateContamination",
+	"--input", "{0}/pileups.table".format(varcall_dir),
+	"--output", "{0}/contamination.table".format(varcall_dir),
+	# "2>>", os.path.join(postreports_dir, "calculateContamination_report.txt")
+	])
+	subprocess.run(calculateContamination, shell=True)
 	
+
+	### LEARN ORIENTATION BIAS ARTIFACTS
+	## 4. Learning the parameters of a model for orientation bias
+	## This tool uses an optional F1R2 counts output of Mutect2 to learn the parameters
+	## of a model for orientation bias. It finds prior probabilities of single-stranded
+	## substitution errors prior to sequencing for each trinucleotide context.
+	print("4/6 | LearnReadOrientationModel - Learning the parameters of a model for orientation bias: in progress ..")
+	learnReadOrientationModel = " ".join([
+	"gatk LearnReadOrientationModel",
+	"--input", "{0}/f1r2.tar.gz".format(varcall_dir),
+	"--output", "{0}/read_orientation_model.tar.gz".format(varcall_dir),
+	# "2>>", os.path.join(postreports_dir, "learnReadOrientationModel_report.txt")
+	])
+	subprocess.run(learnReadOrientationModel, shell=True)
+
 	
-	# for i, file in enumerate(aligned_data):
-	# 	file_name = os.path.basename(file).split(".")[0]
-	# 	print("{0}/{1} | Variant Calling {2} using GATK4...".format(i, len(aligned_data), file_name))
-		
+	### FILTERING THE VARIANTS 
+	## 7. Filter variant calls from MuTect
+	print("5/6 | FilterMutectCalls - Learning the parameters of a model for orientation bias: in progress ..")
+	filterMutectCalls = " ".join([
+	"gatk FilterMutectCalls",
+	"--reference", refGenome_GRCh38,
+	"--variant", "{0}/variants.vcf".format(varcall_dir),
+	"--contamination-table", "{0}/contamination.table".format(varcall_dir),
+	"--output", "{0}/filtered_variants.vcf".format(varcall_dir),
+	"--filtering-stats", "{0}/mutect2_filtering_stats.txt".format(postreports_dir),
+	"--orientation-bias-artifact-priors", "{0}/read_orientation_model.tar.gz".format(varcall_dir),
+	# "2>>", os.path.join(postreports_dir, "filterMutectCalls_report.txt")
+	])
+	subprocess.run(FilterMutectCalls, shell=True)
 
-	## 1. Generate OXOG metrics:
-	# "gatk CollectSequencingArtifactMetrics"
-	# -I Tumor_Sample_Alignment.bam \
-	# -O <job_identifier> \
-	# --FILE_EXTENSION .txt \
-	# -R GRCh38.d1.vd1.fa  ## Only chr1-22 + XYM
 
+	### ANNOTATE VARIANTS
+	## 6. Adding information to the discovered variants
+	## At this step we run tools to add information to the discovered variants in our dataset.
+	## One of those tools, Funcotator, can be used to add gene-level information to each variant.
+	print("6/6 | Funcotator - Adding information to the discovered variants in our dataset: in progress ..")
+	funcotator = " ".join([
+	"gatk Funcotator",
+	"--ref-version hg38"
+	"--reference", refGenome_GRCh38,
+	"--variant", "{0}/filtered_variants.vcf".format(varcall_dir),
+	"--output-file-format VCF",  # The output file format
+	"--output", "{0}/filtered_variants.annot.vcf".format(varcall_dir),
+	"--data-sources-path", "{0}/functional_annot".format(gatk_subfiles),
+	# "2>>", os.path.join(postreports_dir, "functional_annotator_report.txt")
+	])
+	subprocess.run(funcotator, shell=True)
+
+
+	return
+
+def visualization():
 	
-	# ## 2. Generate pileup summaries on tumor sample:
-	# "gatk GetPileupSummaries"
-	# -I Tumor_Sample_Alignment.bam \
-	# -O <job_identifier>.targeted_sequencing.table \
-	# -V af-only-gnomad-common-biallelic.grch38.main.vcf.gz \ # Germline reference from gnomad
-	# -L intervals.bed \ ## Only chr1-22 + XYM
-	# -R GRCh38.d1.vd1.fa
-
-	# ## 3. Calculate contamination on tumor sample
-	# "gatk CalculateContamination" \
-	# -I <job_identifier>.targeted_sequencing.table \ # From step 2
-	# -O <job_identifier>.targeted_sequencing.contamination.table
-
-	# ## 4. Find tumor sample name from BAM
-	# "gatk GetSampleName" \
-	# -I Tumor_Sample_Alignment.bam \
-	# -O <job_identifier>.targeted_sequencing.sample_name
-
-	# ## 5. Run MuTect2 using only tumor sample on chromosome level (25 commands with different intervals)
-	# "gatk Mutect2" \
-	# -R GRCh38.d1.vd1.fa \
-	# -L chr4:1-190214555 \ # Specify chromosome
-	# -I Tumor_Sample_Alignment.bam \
-	# -O 3.mt2.vcf \
-	# -tumor <tumor_sample_name> \ # From step 4
-	# --af-of-alleles-not-in-resource 2.5e-06 \
-	# --germline-resource af-only-gnomad.hg38.vcf.gz \ # Germline reference from gnomad
-	# -pon gatk4_mutect2_4136_pon.vcf.gz # New panel of normal created by 4136 TCGA curated normal samples, using GATK4
-
-
-	# ## After this step, all chromosome level VCFs are merged into one.
-
-	# ## 6. Sort VCF with Picard
-	# "gatk SortVcf" \
-	# SEQUENCE_DICTIONARY=GRCh38.d1.vd1.dict \
-	# OUTPUT=<job_identifier>.targeted_sequencing.mutect2.tumor_only.sorted.vcf.gz \
-	# I=merged_multi_gatk4_mutect2_tumor_only_calling.vcf \ # From step 5
-	# CREATE_INDEX=true
-
-	# ## 7. Filter variant calls from MuTect
-	# "gatk FilterMutectCalls" \
-	# -O <job_identifier>.targeted_sequencing.mutect2.tumor_only.contFiltered.vcf.gz \
-	# -V <job_identifier>.targeted_sequencing.mutect2.tumor_only.sorted.vcf.gz \ # From step 6
-	# --contamination-table <job_identifier>.targeted_sequencing.contamination.table \ # From step 3
-	# -L intervals.bed
-
-	# ## 8. Filter variants by orientation bias
-	# "gatk FilterByOrientationBias" \
-	# -O <job_identifier>.targeted_sequencing.tumor_only.gatk4_mutect2.raw_somatic_mutation.vcf.gz \ # final output
-	# -P <job_identifier>.pre_adapter_detail_metrics.txt \ # From step 1
-	# -V <job_identifier>.targeted_sequencing.mutect2.tumor_only.contFiltered.vcf.gz \ # From step 7
-	# -L intervals.bed \
-	# -R GRCh38.d1.vd1.fa \
-	# -AM G/T \
-	# -AM C/T
-
 	return
 
 def main():
@@ -430,6 +454,6 @@ def main():
 
 	# post_processing()
 
-	variant_calling()
+	calling_variants()
 
 if __name__ == "__main__": main()
