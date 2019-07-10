@@ -15,10 +15,7 @@ reference_annotation_gtf = "/home/stavros/playground/progs/reference_files/gene_
 reference_annotation_bed = "/home/stavros/playground/progs/reference_files/gene_annotation/hg38_Gencode_V28.bed"
 whole_genome_intervals = "/home/stavros/playground/progs/reference_files/gatk_subfiles/intervals/wgs_calling_regions.hg38.interval_list"
 gatk_subfiles = "/home/stavros/playground/progs/reference_files/gatk_subfiles"
-gatk_liftover_GRCh38 = "/home/stavros/playground/progs/reference_files/gatk_subfiles/liftover_GRCh38/af-only-gnomad.hg38.vcf.gz"
 gatk_functional_annot = "/home/stavros/playground/progs/reference_files/gatk_subfiles/functional_annot/funcotator_dataSources.v1.6.20190124s"
-gatk_pon = "/home/stavros/playground/progs/reference_files/gatk_subfiles/panel_of_normals/1000g_pon.hg38.vcf.gz"
-gatk_kvs = "/home/stavros/playground/progs/reference_files/gatk_subfiles/known_variant_sites/small_exac_common_3.hg38.vcf.gz"
 gatk3_8 ="gatk --java-options \"-Xmx8G\" /home/stavros/playground/progs/GenomeAnalysisTK-3.8-1/GenomeAnalysisTK.jar"
 
 
@@ -33,7 +30,7 @@ requiredArgs = parser.add_argument_group('required arguments')
 requiredArgs.add_argument('-i', '--project_dir', required=False, metavar='', 
 					   	help="Path of the input directory that contains the raw data.")
 # Number of threads/CPUs to be used
-parser.add_argument('-th', '--threads', dest='threads', default=str(30), metavar='', 
+parser.add_argument('-th', '--threads', dest='threads', default=str(40), metavar='', 
                 	help="Number of threads to be used in the analysis")
 # Display the version of the pipeline 
 parser.add_argument('-v', '--version', action='version', version='%(prog)s {0}'.format(__version__))
@@ -59,7 +56,8 @@ postprocesed_dir = os.path.join(analysis_dir, "postprocessed_data")
 postreports_dir = os.path.join(analysis_dir, "postprocessing_reports")
 
 varcall_dir = os.path.join(analysis_dir, "variant_calling")
-
+prefilter_plots = os.path.join(varcall_dir, "prefilter_plots")
+filtered_plots = os.path.join(varcall_dir, "filtered_plots")
 
 
 def quality_control():
@@ -69,63 +67,63 @@ def quality_control():
 	print("PREPROCESSING & QUALITY CONTROL")
 	for path, subdir, folder in os.walk(args.project_dir):
 		for i, dirs in enumerate(subdir, 0):
-			if dirs == "Tanda_104":
-				print("{0}/{1} | Analysing {2}".format(i, len(subdir), dirs))
-				mfiltered_data = [f for f in glob.glob(os.path.join(os.path.join(path, dirs), "*.fastq.gz"))]
+			# if dirs == "Tanda_104":
+			print("{0}/{1} | Analysing {2}".format(i, len(subdir), dirs))
+			mfiltered_data = [f for f in glob.glob(os.path.join(os.path.join(path, dirs), "*.fastq.gz"))]
 
-				print("fastQscreen - Checking random reads for possible contamination: in progress ..")
-				fastQscreen = ' '.join([
-				"fastq_screen",  # Call fastQ screen to check contamination in the processed data
-				"--threads", args.threads,  # Number of threads to use
-				"--outdir",  temp,  # Directory in which the output files will be saved
-				"--quiet",  # Suppress all progress reports on stderr and only report errors
-				"--conf", fastQscreen_config,  # Location of the required configuration file
-				' '.join(mfiltered_data),
-				"2>>", os.path.join(temp, "{0}_fastQscreen_report.txt".format(dirs))])  # Output fastQ screen report
-				subprocess.run(fastQscreen, shell=True)
-			
-				print("fastQC - Quality Control reports are being generated: in progress ..")
-				fastQC = ' '.join([
-				"fastqc",  # Call fastQC to quality control all processed data
-				"--threads", args.threads,  # Number of threads to use
-				"--quiet",  # Print only log warnings
-				"--outdir", temp,  # Create all output files in this specified output directory
-				' '.join(mfiltered_data),  # String containing all samples that are about to be checked
-				"2>>", os.path.join(temp, "{0}_fastQC_init_report.txt".format(dirs))])  # Output fastQC report
-				subprocess.run(fastQC, shell=True)
+			print("fastQscreen - Checking random reads for possible contamination: in progress ..")
+			fastQscreen = ' '.join([
+			"fastq_screen",  # Call fastQ screen to check contamination in the processed data
+			"--threads", args.threads,  # Number of threads to use
+			"--outdir",  temp,  # Directory in which the output files will be saved
+			"--quiet",  # Suppress all progress reports on stderr and only report errors
+			"--conf", fastQscreen_config,  # Location of the required configuration file
+			' '.join(mfiltered_data),
+			"2>>", os.path.join(temp, "{0}_fastQscreen_report.txt".format(dirs))])  # Output fastQ screen report
+			subprocess.run(fastQscreen, shell=True)
+		
+			print("fastQC - Quality Control reports are being generated: in progress ..")
+			fastQC = ' '.join([
+			"fastqc",  # Call fastQC to quality control all processed data
+			"--threads", args.threads,  # Number of threads to use
+			"--quiet",  # Print only log warnings
+			"--outdir", temp,  # Create all output files in this specified output directory
+			' '.join(mfiltered_data),  # String containing all samples that are about to be checked
+			"2>>", os.path.join(temp, "{0}_fastQC_init_report.txt".format(dirs))])  # Output fastQC report
+			subprocess.run(fastQC, shell=True)
 
-				print("fastP - Quality Control of all reads: in progress ..")
-				for file in mfiltered_data:
-					sample_name = os.path.basename(file).split(".")[0]
-					fastP = ' '.join([
-					"fastp",  # Call fastQC to quality control all processed data
-					"--thread", args.threads,  # Number of threads to use
-					"--in1", file,  # Input read1 file
-					"--disable_adapter_trimming",  # Adapter trimming is disabled
-					"--disable_trim_poly_g",  # Disable polyG tail trimming
-					"--disable_quality_filtering",  # Quality filtering is disabled
-					"--disable_length_filtering",  # Length filtering is disabled
-					"--overrepresentation_analysis",  # Enable overrepresented sequence analysis
-					"--html", os.path.join(temp, "{0}_fastp.html".format(sample_name)),  # Create ftml file in this specified output directory
-					"--json", os.path.join(temp, "{0}_fastp.json".format(sample_name)),  # Create json output file in this specified output directory
-					"2>>", os.path.join(temp, "{0}_fastP_report.txt".format(sample_name))])  # Output fastP report
-					subprocess.run(fastP, shell=True) 
+			print("fastP - Quality Control of all reads: in progress ..")
+			for file in mfiltered_data:
+				sample_name = os.path.basename(file).split(".")[0]
+				fastP = ' '.join([
+				"fastp",  # Call fastQC to quality control all processed data
+				"--thread", args.threads,  # Number of threads to use
+				"--in1", file,  # Input read1 file
+				"--disable_adapter_trimming",  # Adapter trimming is disabled
+				"--disable_trim_poly_g",  # Disable polyG tail trimming
+				"--disable_quality_filtering",  # Quality filtering is disabled
+				"--disable_length_filtering",  # Length filtering is disabled
+				"--overrepresentation_analysis",  # Enable overrepresented sequence analysis
+				"--html", os.path.join(temp, "{0}_fastp.html".format(sample_name)),  # Create ftml file in this specified output directory
+				"--json", os.path.join(temp, "{0}_fastp.json".format(sample_name)),  # Create json output file in this specified output directory
+				"2>>", os.path.join(temp, "{0}_fastP_report.txt".format(sample_name))])  # Output fastP report
+				subprocess.run(fastP, shell=True) 
 
-					# Calling BBDuk to quality trim the data
-					preprocessing_rawdata(file, sample_name)
+				# Calling BBDuk to quality trim the data
+				preprocessing_rawdata(file, sample_name)
 
-				print("multiQC - Summing all QC reports: in progress ..")
-				print("bbduk - Quality trimming and filtering of all reads: in progress ..")
-				multiQC = " ".join([
-				"/home/stavros/anaconda3/bin/multiqc",  # Call MultiQC
-				"--quiet",  # Print only log warnings
-				"--outdir", temp,  # Create report in the FastQC reports directory
-				"--filename", "{0}_init_summarised_report".format(dirs),  # Name of the output report 
-				temp,  # Directory where all FastQC and Cutadapt reports reside
-				"2>>", os.path.join(temp, "{0}_multiQC_init_report.txt".format(dirs))])  # Output multiQC report
-				subprocess.run(multiQC, shell=True)
+			print("multiQC - Summing all QC reports: in progress ..")
+			print("bbduk - Quality trimming and filtering of all reads: in progress ..")
+			multiQC = " ".join([
+			"/home/stavros/anaconda3/bin/multiqc",  # Call MultiQC
+			"--quiet",  # Print only log warnings
+			"--outdir", temp,  # Create report in the FastQC reports directory
+			"--filename", "{0}_init_summarised_report".format(dirs),  # Name of the output report 
+			temp,  # Directory where all FastQC and Cutadapt reports reside
+			"2>>", os.path.join(temp, "{0}_multiQC_init_report.txt".format(dirs))])  # Output multiQC report
+			subprocess.run(multiQC, shell=True)
 
-				os.system('mv {0}/* {1}'.format(temp, prereports_dir))
+			os.system('mv {0}/* {1}'.format(temp, prereports_dir))
 	
 	for path, subdir, folder in os.walk(prereports_dir):
 		for name in folder:
@@ -341,77 +339,126 @@ def post_processing():
 		"2>>", os.path.join(postreports_dir, "analyzeCovariates_report.txt")])
 		subprocess.run(analyzeCovariates, shell=True)
 
-	# os.system('rm {0}/concat_samples*'.format(postprocesed_dir))
-	# os.system('rm {0}/*data.table'.format(postprocesed_dir))
+	os.system('rm {0}/concat_samples*'.format(postprocesed_dir))
+	os.system('rm {0}/*data.table'.format(postprocesed_dir))
 	return
 
 def calling_variants():
 	print("CALLING VARIANTS")
-	if not os.path.exists(varcall_dir): os.makedirs(varcall_dir)
+	if not os.path.exists(prefilter_plots): os.makedirs(prefilter_plots)
+	if not os.path.exists(filtered_plots): os.makedirs(filtered_plots)
 	calibrated_data = glob.glob("{0}/*.recalibrated.bam".format(postprocesed_dir))
 	
 	### CALL CANDIDATE VARIANTS
 	## 1. Run freebayes to call variants
-	print("1/ | freebayes - Call somatic SNVs and indels: in progress ..")
+	print("1/9 | freebayes - Call somatic SNVs and indels: in progress ..")
 	freebayes = " ".join([
 	"freebayes",
 	"--bam", ' '.join(calibrated_data),
 	"--fasta-reference", refGenome_GRCh38,
-	"--vcf", "{0}/variants.vcf".format(varcall_dir),
+	"|", "gzip >,", "{0}/variants.vcf.gz".format(varcall_dir),
 	"2>>", os.path.join(postreports_dir, "freebayes_report.txt")])
-	# subprocess.run(freebayes, shell=True)
+	subprocess.run(freebayes, shell=True)
 
-	print("2/ | Bcftools stats - Exporting stats of the called variants: in progress ..")
+	# 2. Indexing the vcf file
+	subprocess.run("tabix -p vcf {0}/variants.vcf.gz".format(varcall_dir), shell=True) 
+
+	### STATS AND FILTERING STEPS
+	## 3. Exporting stats of the called variants
+	print("2/9 | rtg stats - Exporting stats of the called variants: in progress ..")
+	rtg_stats = " ".join([
+	"rtg vcfstats",
+	"{0}/variants.vcf.gz".format(varcall_dir),
+	">", "{0}/rtg_stats.txt".format(varcall_dir),
+	"2>>", os.path.join(postreports_dir, "rtg_stats_report.txt")])
+	subprocess.run(rtg_stats, shell=True)
+
+	print("3/9 | Bcftools stats - Exporting stats of the called variants: in progress ..")
 	bcftools_stats = " ".join([
 	"bcftools stats",
-	"{0}/variants.vcf".format(varcall_dir),
-	">", "{0}/stats.txt".format(varcall_dir),
+	"--samples -",  # list of samples for sample stats (include all)
+	"--fasta-ref", refGenome_GRCh38,  # reference to determine INDEL context
+	"{0}/variants.vcf.gz".format(varcall_dir),  # input file
+	">", "{0}/bcftools_stats.txt".format(varcall_dir),  # output file
 	"2>>", os.path.join(postreports_dir, "bcftools_stats_report.txt")])
-	# subprocess.run(bcftools_stats, shell=True)
+	subprocess.run(bcftools_stats, shell=True)
+
+	print("4/9 | Plot vcfstats - Exporting plots based on the stats of the called variants: in progress ..")
+	plot_vcfstats = " ".join([
+	"plot-vcfstats",
+	"--prefix", prefilter_plots,
+	"{0}/bcftools_stats.txt".format(varcall_dir),
+	"2>>", os.path.join(postreports_dir, "plot_vcfstats_report.txt")])
+	subprocess.run(plot_vcfstats, shell=True)
 	
-	print("3/ | Bcftools filter - Applying several filters to the called variants: in progress ..")
+	## 4. Filtering variants
+	print("5/9 | Bcftools filter - Applying several filters to the called variants: in progress ..")
 	bcftools_filter = " ".join([
 	"bcftools filter",
 	"--output-type z",
 	"--threads", args.threads,
-	"-e", "\'%QUAL<=20 || %QUAL/INFO/AO<=2 || SAF<=2 || SAR<=2\'",
-	"{0}/variants.vcf".format(varcall_dir),
+	"-e", "\'%QUAL<=30 || %QUAL/INFO/AO<=2 || SAF<=2 || SAR<=2\'",  # %DP<=10 ||
+	"{0}/variants.vcf.gz".format(varcall_dir),
 	">", "{0}/filtered_variants.vcf.gz".format(varcall_dir),
 	"2>>", os.path.join(postreports_dir, "bcftools_stats_report.txt")])
-	# subprocess.run(bcftools_filter, shell=True)
+	subprocess.run(bcftools_filter, shell=True)
 
+	# 5. Indexing the filtered vcf file
+	subprocess.run("tabix -p vcf {0}/filtered_variants.vcf.gz".format(varcall_dir), shell=True) 
+
+	## 6. Exporting stats of the filtered variants
+	print("6/9 | rtg stats - Exporting stats of the filtered variants: in progress ..")
+	filt_rtg_stats = " ".join([
+	"rtg vcfstats",
+	"{0}/filtered_variants.vcf.gz".format(varcall_dir),
+	">", "{0}/rtg_stats.filtered.txt".format(varcall_dir),
+	"2>>", os.path.join(postreports_dir, "rtg_stats_filtered_report.txt")])
+	subprocess.run(filt_rtg_stats, shell=True)
+
+	print("7/9 | Bcftools stats - Exporting stats of the filtered variants: in progress ..")
+	filt_bcftools_stats = " ".join([
+	"bcftools stats",
+	"--samples -",  # list of samples for sample stats (include all)
+	"--fasta-ref", refGenome_GRCh38,  # reference to determine INDEL context
+	"{0}/filtered_variants.vcf.gz".format(varcall_dir),  # input file
+	">", "{0}/bcftools_stats.filtered.txt".format(varcall_dir),  # output file
+	"2>>", os.path.join(postreports_dir, "bcftools_stats_filtered_report.txt")])
+	subprocess.run(filt_bcftools_stats, shell=True)
+
+	print("8/9 | Plot vcfstats - Exporting plots based on the stats of the filtered variants: in progress ..")
+	filt_plot_vcfstats = " ".join([
+	"plot-vcfstats",
+	"--prefix", filtered_plots,
+	"{0}/bcftools_stats.filtered.txt".format(varcall_dir),
+	"2>>", os.path.join(postreports_dir, "plot_vcfstats_filtered_report.txt")])
+	subprocess.run(filt_plot_vcfstats, shell=True)
 
 	### ANNOTATE VARIANTS
-	## 6. Adding information to the discovered variants
+	## 7. Adding information to the discovered variants
 	## At this step we run tools to add information to the discovered variants in our dataset.
 	## One of those tools, Funcotator, can be used to add gene-level information to each variant.
-	print("4/ | Funcotator - Adding information to the discovered variants in our dataset: in progress ..")
+	print("9/9 | Funcotator - Adding information to the discovered variants in our dataset: in progress ..")
 	funcotator = " ".join([
 	"gatk Funcotator",
 	"--ref-version hg38",
 	"--reference", refGenome_GRCh38,
-	"--variant", "{0}/filtered_variants.vcf".format(varcall_dir),
+	"--variant", "{0}/filtered_variants.vcf.gz".format(varcall_dir),
 	"--output-file-format VCF",  # The output file format
 	"--output", "{0}/filtered_variants.annot.vcf".format(varcall_dir),
 	"--data-sources-path", gatk_functional_annot,
 	"2>>", os.path.join(postreports_dir, "functional_annotator_report.txt")])
-	# subprocess.run(funcotator, shell=True)
-
-
+	subprocess.run(funcotator, shell=True)
 	return
 
-def visualization():
-	
-	return
 
 def main():
 	
 
-	# quality_control()
+	quality_control()
 	
-	# aligning()
+	aligning()
 
-	# post_processing()
+	post_processing()
 
 	calling_variants()
 
