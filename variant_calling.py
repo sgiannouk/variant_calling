@@ -9,14 +9,20 @@ import shutil, time, glob, sys, os, re
 
 
 inputFolder = "/shared/projects/jill_dnapanel_pangaea"
-fastQscreen_config = "/home/stavros/playground/progs/16S_subsidiary_files/fastq_screen.conf"
-refGenome_GRCh38 = "/home/stavros/playground/progs/reference_files/reference_genome/GRCh38_primAssembly/GRCh38_primary_assembly_genome.fa"
-reference_annotation_gtf = "/home/stavros/playground/progs/reference_files/gene_annotation/gencode.v29.primary_assembly.annotation.gtf"
-reference_annotation_bed = "/home/stavros/playground/progs/reference_files/gene_annotation/hg38_Gencode_V28.bed"
-whole_genome_intervals = "/home/stavros/playground/progs/reference_files/gatk_subfiles/intervals/wgs_calling_regions.hg38.interval_list"
-gatk_subfiles = "/home/stavros/playground/progs/reference_files/gatk_subfiles"
-gatk_functional_annot = "/home/stavros/playground/progs/reference_files/gatk_subfiles/functional_annot/funcotator_dataSources.v1.6.20190124s"
-gatk3_8 ="gatk --java-options \"-Xmx8G\" /home/stavros/playground/progs/GenomeAnalysisTK-3.8-1/GenomeAnalysisTK.jar"
+fastQscreen_config = "/home/stavros/references/fastQscreen_references/fastq_screen.conf"
+### REFERENCE FILES
+refGenome_GRCh38 = "/home/stavros/references/reference_genome/GRCh38_GencodeV31_primAssembly/GRCh38.primary_assembly.genome.fa"
+reference_annotation_gtf = "/home/stavros/references/reference_annotation/GRCh38_gencode.v31.primAssembly_psudo_trna.annotation.gtf.gz"
+reference_annotation_bed = "/home/stavros/references/reference_annotation/hg38_gencode.v31.allComprehensive_pseudo.annotation.bed"
+### GATK FILES
+gatk_functional_annot = "/home/stavros/references/gatk_subfiles/functional_annot/funcotator_dataSources.v1.6.20190124s"
+gatk_wg_intervals = "/home/stavros/references/gatk_subfiles/intervals/wgs_calling_regions.hg38.interval_list"
+gatk_liftover_GRCh38 = "/home/stavros/references/gatk_subfiles/liftover_GRCh38/af-only-gnomad.hg38.vcf.gz"
+gatk3_8 = "java -jar /home/stavros/playground/progs/GenomeAnalysisTK-3.8-1/GenomeAnalysisTK.jar"
+gatk_pon = "/home/stavros/references/gatk_subfiles/panel_of_normals/1000g_pon.hg38.vcf.gz"
+gatk_known_sites = "/home/stavros/references/gatk_subfiles/known_sites"
+
+
 
 
 usage = "variant_calling [options]"
@@ -30,44 +36,38 @@ requiredArgs = parser.add_argument_group('required arguments')
 requiredArgs.add_argument('-i', '--project_dir', required=False, metavar='', 
 					   	help="Path of the input directory that contains the raw data.")
 # Number of threads/CPUs to be used
-parser.add_argument('-th', '--threads', dest='threads', default=str(40), metavar='', 
+parser.add_argument('-th', '--threads', dest='threads', default=str(20), metavar='', 
                 	help="Number of threads to be used in the analysis")
 # Display the version of the pipeline 
 parser.add_argument('-v', '--version', action='version', version='%(prog)s {0}'.format(__version__))
 # Get the options and return them
 args = parser.parse_args()
-
-
-
 args.project_dir = inputFolder
 
 
-### Main directories
-
+### Directories
 analysis_dir = os.path.join(os.getcwd(), "analysis")
-temp = os.path.join(analysis_dir, "temp")
-
 preprocesed_dir = os.path.join(analysis_dir, "preprocesed_data")
 prereports_dir = os.path.join(analysis_dir, "preprocessing_reports")
-
 alignment_dir = os.path.join(analysis_dir, "alignments")
-
 postprocesed_dir = os.path.join(analysis_dir, "postprocessed_data")
 postreports_dir = os.path.join(analysis_dir, "postprocessing_reports")
-
 varcall_dir = os.path.join(analysis_dir, "variant_calling")
 prefilter_plots = os.path.join(varcall_dir, "prefilter_plots")
 filtered_plots = os.path.join(varcall_dir, "filtered_plots")
+temp = os.path.join(analysis_dir, "temp")
 
 
 def quality_control():
+	print("PREPROCESSING & QUALITY CONTROL")
 	if not os.path.exists(prereports_dir): os.makedirs(prereports_dir)
 	if not os.path.exists(preprocesed_dir): os.makedirs(preprocesed_dir)
 	if not os.path.exists(temp): os.makedirs(temp)
-	print("PREPROCESSING & QUALITY CONTROL")
+	
+	
 	for path, subdir, folder in os.walk(args.project_dir):
 		for i, dirs in enumerate(subdir, 0):
-			# if dirs == "Tanda_104":
+			# if dirs == "Tanda_106":
 			print("{0}/{1} | Analysing {2}".format(i, len(subdir), dirs))
 			mfiltered_data = [f for f in glob.glob(os.path.join(os.path.join(path, dirs), "*.fastq.gz"))]
 
@@ -79,7 +79,7 @@ def quality_control():
 			"--quiet",  # Suppress all progress reports on stderr and only report errors
 			"--conf", fastQscreen_config,  # Location of the required configuration file
 			' '.join(mfiltered_data),
-			"2>>", os.path.join(temp, "{0}_fastQscreen_report.txt".format(dirs))])  # Output fastQ screen report
+			"2>>", os.path.join(temp, "{0}_fastQscreen_report.txt".format(dirs))])  # Output fastQ screen report 
 			subprocess.run(fastQscreen, shell=True)
 		
 			print("fastQC - Quality Control reports are being generated: in progress ..")
@@ -123,8 +123,7 @@ def quality_control():
 			"2>>", os.path.join(temp, "{0}_multiQC_init_report.txt".format(dirs))])  # Output multiQC report
 			subprocess.run(multiQC, shell=True)
 
-			os.system('mv {0}/* {1}'.format(temp, prereports_dir))
-	
+	os.system('mv {0}/* {1}'.format(temp, prereports_dir))
 	for path, subdir, folder in os.walk(prereports_dir):
 		for name in folder:
 			file = os.path.join(path, name)
@@ -157,12 +156,13 @@ def preprocessing_rawdata(file, sample_name):
 	return
 
 def aligning():
+	print("\nALIGNING AGAINST THE REFERENCE GENOME (GenCode.v31)")
 	if not os.path.exists(alignment_dir): os.makedirs(alignment_dir)
-	if not os.path.exists(postprocesed_dir): os.makedirs(postprocesed_dir)
 	preprocesed_data = glob.glob("{0}/*.qt.fastq.gz".format(preprocesed_dir))
-	print("\nALIGNING AND POST-ALIGNMENT QUALITY CONTROL")
+	
+
 	print("minimap2 - aligning in total {0} samples against the reference genome: in progress ..".format(len(preprocesed_data)))
-	for i, file in enumerate(preprocesed_data):
+	for i, file in enumerate(preprocesed_data, 1):
 		file_name = os.path.basename(file).split(".")[0]
 		minimap2_genome = " ".join([
 		"~/playground/progs/minimap2-2.17_x64-linux/minimap2",  # Call minimap2 (v2.17-r941)
@@ -181,10 +181,14 @@ def aligning():
   		"-o", os.path.join(alignment_dir, "{0}.qt.genome.bam".format(file_name)), "-",  # Sorted output  BAM file
 		"2>>", os.path.join(prereports_dir, "minimap2_genome_report.txt")])  # minimap2 report
 		subprocess.run(minimap2_genome, shell=True)
+	mapping_qc()
+	return 
 
-	# Post Alignment QC
+def mapping_qc():
+	print("\nMAPPING QUALITY CONTROL AND METRICS")
 	if not os.path.exists(postreports_dir): os.makedirs(postreports_dir)
 	aligned_data = glob.glob("{0}/*.qt.genome.bam".format(alignment_dir))
+
 
 	print("fastQC - Alignment Quality Control reports are being generated: in progress ..")
 	fastQC_align = ' '.join([
@@ -197,9 +201,8 @@ def aligning():
 	subprocess.run(fastQC_align, shell=True)
 
 	print("Picard & RSeQC - removing duplicates and generating post-alignment stats: in progress ..")
-	for i, file in enumerate(aligned_data):
+	for i, file in enumerate(aligned_data, 1):
 		file_name = os.path.basename(file).split(".")[0]
-
 		# Removing duplicate reads
 		rmDuplicates = " ".join([
 		"samtools markdup",  # Call samtools markdup
@@ -211,6 +214,14 @@ def aligning():
 		"{0}/{1}.rdqt.genome.bam".format(alignment_dir, file_name),
 		"2>>", os.path.join(temp, "{0}_rmDuplicates_report.txt".format(file_name))])
 		subprocess.run(rmDuplicates, shell=True)
+		
+		# Indexing the output sorted deduplicated bam file
+		samtools_index = " ".join([
+		"samtools index",  # Indexing the concat_samples.bam file
+		"-@", args.threads,  # Number of threads to be used
+		"{0}/{1}.rdqt.genome.bam".format(alignment_dir, file_name),  # Input BAM file
+		"2>>", os.path.join(temp, "samtools_index_report.txt")])  # Output samtools index report
+		subprocess.run(samtools_index, shell=True)
 
 		# BAM stats
 		bam_stat = ' '.join([
@@ -265,6 +276,7 @@ def aligning():
 def post_processing():
 	# time.sleep(10)
 	print("\nPOST-PROCESSING AND PREPARING DATA FOR VARIANT CALLING")
+	if not os.path.exists(postprocesed_dir): os.makedirs(postprocesed_dir)
 	data = glob.glob("{0}/*.rdqt.genome.bam".format(alignment_dir))
 
 	if not os.path.exists("{0}.dict".format(refGenome_GRCh38[:-3])):
@@ -275,61 +287,93 @@ def post_processing():
 		"--OUTPUT", "{0}.dict".format(refGenome_GRCh38[:-3]),  # Output file
 		"2>>", os.path.join(temp, "ref_dict_report.txt")])  # Output report
 		subprocess.run(ref_dict, shell=True)
-
-	print("1/4 | gatk BaseRecalibrator 1 - Base Quality Score Recalibration: in progress ..")
-	print("1/4 | gatk BaseRecalibrator 1 - Base Quality Score Recalibration: in progress ..")
-	print("2/4 | gatk applyBQSR - Generation of the recalibrated reads: in progress ..")
-	print("3/4 | gatk BaseRecalibrator 2 - Base Quality Score Recalibration: in progress ..")
-	print("4/4 | gatk analyzeCovariates - Evaluate and compare base quality score recalibration: in progress ..")
-	known_sites = [f for f in glob.glob("{0}/known_sites/*.vcf.gz".format(gatk_subfiles))]
-	for file in data:
-		file_name = os.path.basename(file).split(".")[0]
-
-		if not os.path.exists("{0}.bai".format(file)):
-			samtools_index = " ".join([
-			"samtools index",  # Indexing the concat_samples.bam file
-			"-@", args.threads,  # Number of threads to be used
-			file,  # Input BAM file
-			"2>>", os.path.join(temp, "samtools_index_report.txt")])  # Output samtools index report
-			subprocess.run(samtools_index, shell=True)
 	
+	if not os.path.exists("{0}.fai".format(refGenome_GRCh38)):
+		print("samtools faidx - Indexing the reference genome: in progress ..")
+		ref_idx = " ".join([
+		"samtools faidx",  # Calling samtools faidx
+		refGenome_GRCh38,  # Input reference genome
+		"2>>", os.path.join(temp, "samtools_idx_report.txt")])  # Output report
+		subprocess.run(ref_idx, shell=True)
+	
+	print("1/ | gatk RealignerTargetCreator - Define intervals to target for local realignment: in progress ..")
+	list_of_aligned = ' '.join(["--input_file " + files for files in data])
+	known_indels = [f for f in glob.glob("{0}/*indels*.vcf".format(gatk_known_sites))]
+	## IDefine intervals to target for local realignment
+	realignerTargetCreator = " ".join([
+	gatk3_8, "--analysis_type RealignerTargetCreator",  # Call gatk RealignerTargetCreator (v3.8.1.0)
+	list_of_aligned,  # List of all aligned BAM files
+	"--reference_sequence", refGenome_GRCh38,
+	"--known", known_indels[0],  # databases of known InDels
+	"--known", known_indels[1],  # databases of known InDels
+	"--num_threads", args.threads,  # Number of data threads to allocate to this analysis
+	"--out", "{0}/indelRealigner.intervals".format(postprocesed_dir),
+	"2>>", os.path.join(postreports_dir, "realignerTargetCreator_report.txt")])
+	subprocess.run(realignerTargetCreator, shell=True)
+
+	
+	print("2/ | gatk IndelRealigner - Base Quality Score Recalibration: in progress ..")
+	known_sites = [f for f in glob.glob("{0}/*hg38.vcf".format(gatk_known_sites))]
+	# InDel realignemnt
+	indelRealigner = " ".join([
+	gatk3_8, "--analysis_type IndelRealigner",  # 
+	list_of_aligned,  # List of all aligned BAM files
+	"--reference_sequence", refGenome_GRCh38,
+	"--targetIntervals", "{0}/indelRealigner.intervals".format(postprocesed_dir),
+	"--knownAlleles", known_sites[0],  # databases of known InDels
+	"--knownAlleles", known_sites[1],  # databases of known InDels
+	"--knownAlleles", known_sites[2],  # databases of known InDels
+	"--nWayOut", "\'.realigned.bam\'",  # list of output files
+	"--noOriginalAlignmentTags",  # Don't output the original cigar for each realigned read
+	"2>>", os.path.join(postreports_dir, "indelRealigner_report.txt")])
+	subprocess.run(indelRealigner, shell=True, cwd=postprocesed_dir)
+
+
+	data = glob.glob("{0}/*.realigned.bam".format(postprocesed_dir))
+	for i, file in enumerate(data, 1):
+		file_name = os.path.basename(file).split(".")[0]
 		# Phred score recalibration
+		if i==1:print("3/ | gatk BaseRecalibrator 1 - Base Quality Score Recalibration: in progress ..")
 		preBaseRecalibrator = " ".join([
-		"gatk BaseRecalibrator",  # Call gatk MarkDuplicates(v4.1.2.0)
+		"gatk BaseRecalibrator",  # Call gatk BaseRecalibrator (v4.1.2.0)
 		"--input", file,
 		"--known-sites", known_sites[0],  # databases of known polymorphic sites
 		"--known-sites", known_sites[1],  # databases of known polymorphic sites
 		"--known-sites", known_sites[2],  # databases of known polymorphic sites
 		"--reference", refGenome_GRCh38,
-		"--intervals", whole_genome_intervals,
+		"--intervals", gatk_wg_intervals,
 		"--output", "{0}/{1}_recal_data.table".format(postprocesed_dir, file_name),
 		"2>>", os.path.join(postreports_dir, "preBaseRecalibrator_report.txt")])
 		subprocess.run(preBaseRecalibrator, shell=True)
 
 		# Generation of the recalibrated reads
+		if i==1:print("4/ | gatk applyBQSR - Generation of the recalibrated reads: in progress ..")
 		applyBQSR = " ".join([
 		"gatk ApplyBQSR",  # Call gatk ApplyBQSR (v4.1.2.0)
-		"--input", file,
-		"--intervals", whole_genome_intervals,
-		"--output", "{0}/{1}.recalibrated.bam".format(postprocesed_dir, file_name),	
-		"--bqsr-recal-file", "{0}/{1}_recal_data.table".format(postprocesed_dir, file_name),
+		"--intervals", gatk_wg_intervals,
+		"--input", file,  # Input file containing sequence data
+		"--bqsr-recal-file", "{0}/{1}_recal_data.table".format(postprocesed_dir, file_name),  # File with base quality score recalibration
+		"--output", "{0}/{1}.real.recal.bam".format(postprocesed_dir, file_name),  # Output file
 		"2>>", os.path.join(postreports_dir, "applyBQSR_report.txt")])
 		subprocess.run(applyBQSR, shell=True)
 
+
 		# Phred score recalibration
+		if i==1:print("6/ | gatk BaseRecalibrator 2 - Base Quality Score Recalibration: in progress ..")
 		afterBaseRecalibrator = " ".join([
-		"gatk BaseRecalibrator",  # Call gatk MarkDuplicates(v4.1.2.0)
+		"gatk BaseRecalibrator",  # Call gatk BaseRecalibrator (v4.1.2.0)
 		"--reference", refGenome_GRCh38,
 		"--known-sites", known_sites[0],  # databases of known polymorphic sites
 		"--known-sites", known_sites[1],  # databases of known polymorphic sites
 		"--known-sites", known_sites[2],  # databases of known polymorphic sites
-		"--intervals", whole_genome_intervals,
-		"--input", "{0}/{1}.recalibrated.bam".format(postprocesed_dir, file_name),
+		"--intervals", gatk_wg_intervals,
+		"--input", "{0}/{1}.real.recal.bam".format(postprocesed_dir, file_name),
 		"--output", "{0}/{1}_post_recal_data.table".format(postprocesed_dir, file_name),
 		"2>>", os.path.join(postreports_dir, "afterBaseRecalibrator_report.txt")])
 		subprocess.run(afterBaseRecalibrator, shell=True)
 
 		# Evaluate and compare base quality score recalibration (BQSR) tables
+		if i==1:print("7/ | gatk AnalyzeCovariates - Evaluate and compare base quality score recalibration: in progress ..")
 		analyzeCovariates = " ".join([
 		"gatk AnalyzeCovariates",  # Call gatk ApplyBQSR (v4.1.2.0)
 		"--before-report-file", "{0}/{1}_recal_data.table".format(postprocesed_dir, file_name),
@@ -338,27 +382,81 @@ def post_processing():
 		"--plots-report-file", "{0}/{1}BQSR.pdf".format(postreports_dir, file_name),	
 		"2>>", os.path.join(postreports_dir, "analyzeCovariates_report.txt")])
 		subprocess.run(analyzeCovariates, shell=True)
-
-	os.system('rm {0}/concat_samples*'.format(postprocesed_dir))
-	os.system('rm {0}/*data.table'.format(postprocesed_dir))
+		os.system('rm {0}/*.rdqt.genome.realigned.*'.format(postprocesed_dir))
 	return
 
 def calling_variants():
 	print("CALLING VARIANTS")
 	if not os.path.exists(prefilter_plots): os.makedirs(prefilter_plots)
 	if not os.path.exists(filtered_plots): os.makedirs(filtered_plots)
-	calibrated_data = glob.glob("{0}/*.recalibrated.bam".format(postprocesed_dir))
+	calibrated_data = glob.glob("{0}/*.real.recal.bam".format(postprocesed_dir))
 	
 	### CALL CANDIDATE VARIANTS
 	## 1. Run freebayes to call variants
-	print("1/9 | freebayes - Call somatic SNVs and indels: in progress ..")
+	# print("1/4 | freebayes - Call somatic SNVs and indels: in progress ..")
 	freebayes = " ".join([
 	"freebayes",
 	"--bam", ' '.join(calibrated_data),
 	"--fasta-reference", refGenome_GRCh38,
-	"|", "gzip >,", "{0}/variants.vcf.gz".format(varcall_dir),
-	"2>>", os.path.join(postreports_dir, "freebayes_report.txt")])
+	"|", "bgzip"
+	"--threads", args.threads, 
+	"- > {0}/variants_freebayes.vcf.gz".format(varcall_dir),
+	# "2>>", os.path.join(postreports_dir, "freebayes_report.txt")
+	])
 	subprocess.run(freebayes, shell=True)
+
+	
+	# 2. Run VarScan2 to call variants
+	# print("2/4 | VarScan2 - Call somatic SNVs and indels: in progress ..")
+	varscan2 = " ".join([
+	# Converting BAM input to vcf
+	"samtools mpileup",  
+	"--redo-BAQ",  # Recalculate BAQ on the fly
+	"--fasta-ref", refGenome_GRCh38,  # Indexed reference sequence file
+	' '.join(calibrated_data),
+	"| varscan mpileup2cns",  # Call consensus & variants from the pileup file
+	"--output-vcf",
+	"|", "bgzip"
+	"--threads", args.threads, 
+	"- > {0}/variants_varscan2.vcf.gz".format(varcall_dir),
+	# "2>>", os.path.join(postreports_dir, "varscan2_report.txt")
+	])
+	subprocess.run(varscan2, shell=True)
+
+
+	# print("3/4 | Mutect2 - Call somatic SNVs and indels via local assembly of haplotypes: in progress ..")
+	list_of_aligned = ' '.join(["--input " + files for files in calibrated_data])
+	mutect2 = " ".join([
+	"gatk Mutect2",
+	list_of_aligned,
+	"--panel-of-normals", gatk_pon,
+	"--reference", refGenome_GRCh38,
+	"--intervals", gatk_wg_intervals,
+	"--germline-resource", gatk_liftover_GRCh38,
+	"--native-pair-hmm-threads", args.threads,
+	"--output", "{0}/variants_mutect2.vcf.gz".format(varcall_dir),
+	# "2>>", os.path.join(postreports_dir, "mutect2_report.txt")
+	])
+	subprocess.run(mutect2, shell=True)
+
+	## 3. Create intersections, unions and complements of the VCF files
+	# print("3/3 | Bcftools isec - Generating the intersections, unions and complements of the VCF files: in progress ..")
+	bcftools_isec = " ".join([
+	"bcftools isec",  # Calling bcftools isec
+	"{0}/variants_freebayes.vcf.gz".format(varcall_dir),  # FreeBayes vcf input 
+	"{0}/variants_varscan2.vcf.gz".format(varcall_dir),  # VarScan2 vcf input 
+	"{0}/variants_mutect2.vcf.gz".format(varcall_dir),
+	"--threads", args.threads,  # Number of extra output compression threads
+	"--output-type z",  # Output in vcf compressed format
+	"--nfiles", str(len(calibrated_data)),
+	"--prefix", varcall_dir,  # Output directory
+	"--threads", args.threads,  # Number of extra output compression threads
+	# "2>>", os.path.join(postreports_dir, "bcftools_isec-report.txt")
+	])
+	subprocess.run(bcftools_isec, shell=True)
+	return
+
+def stats_n_annotation():
 
 	# 2. Indexing the vcf file
 	subprocess.run("tabix -p vcf {0}/variants.vcf.gz".format(varcall_dir), shell=True) 
@@ -450,16 +548,19 @@ def calling_variants():
 	subprocess.run(funcotator, shell=True)
 	return
 
-
 def main():
 	
 
-	quality_control()
+	# quality_control()
 	
-	aligning()
+	# aligning()
 
-	post_processing()
+	# post_processing()
 
 	calling_variants()
 
+	# stats_n_annotation()
+
+
+	## CHECK FOR "WARN" IN EVERY REPORT file! and print
 if __name__ == "__main__": main()
