@@ -1,10 +1,10 @@
 ###Stavros Giannoukakos### 
 
 #Version of the program
-__version__ = "0.1.0"
+__version__ = "0.1.1"
 
-import argparse
-import subprocess
+import argparse, subprocess
+from datetime import datetime
 import shutil, time, glob, sys, os, re
 
 
@@ -37,7 +37,7 @@ requiredArgs = parser.add_argument_group('required arguments')
 requiredArgs.add_argument('-i', '--project_dir', required=False, metavar='', 
 					   	help="Path of the input directory that contains the raw data.")
 # Number of threads/CPUs to be used
-parser.add_argument('-th', '--threads', dest='threads', default=str(25), metavar='', 
+parser.add_argument('-th', '--threads', dest='threads', default=str(10), metavar='', 
                 	help="Number of threads to be used in the analysis")
 # Display the version of the pipeline 
 parser.add_argument('-v', '--version', action='version', version='%(prog)s {0}'.format(__version__))
@@ -47,7 +47,7 @@ args.project_dir = inputFolder
 
 
 ### Directories
-analysis_dir = os.path.join(os.getcwd(), "analysis")
+analysis_dir = os.path.join(os.getcwd(), "vc_analysis")
 preprocesed_dir = os.path.join(analysis_dir, "preprocesed_data")
 prereports_dir = os.path.join(analysis_dir, "preprocessing_reports")
 alignment_dir = os.path.join(analysis_dir, "alignments")
@@ -61,7 +61,7 @@ temp = os.path.join(analysis_dir, "temp")
 
 
 def quality_control():
-	print("PREPROCESSING & QUALITY CONTROL")
+	print("{0} PREPROCESSING & QUALITY CONTROL".format(datetime.now().strftime("%d.%m.%Y %H:%M")))
 	if not os.path.exists(prereports_dir): os.makedirs(prereports_dir)
 	if not os.path.exists(preprocesed_dir): os.makedirs(preprocesed_dir)
 	if not os.path.exists(temp): os.makedirs(temp)
@@ -69,61 +69,61 @@ def quality_control():
 	
 	for path, subdir, folder in os.walk(args.project_dir):
 		for i, dirs in enumerate(subdir, 0):
-			# if dirs == "Tanda_129":
-			print("{0}/{1} | Analysing {2}".format(i, len(subdir), dirs))
-			mfiltered_data = [f for f in glob.glob(os.path.join(os.path.join(path, dirs), "*.fastq.gz"))]
+			if dirs == "Tanda_113":
+				print("{0} {1}/{2} | Analysing {3}".format(datetime.now().strftime("%d.%m %H:%M"),i, len(subdir), dirs))
+				mfiltered_data = [f for f in glob.glob(os.path.join(os.path.join(path, dirs), "*.fastq.gz"))]
 
-			print(">> 1/5 | fastQscreen - Checking random reads for possible contamination: in progress ..")
-			fastQscreen = ' '.join([
-			"fastq_screen",  # Call fastQ screen to check contamination in the processed data
-			"--threads", args.threads,  # Number of threads to use
-			"--outdir",  temp,  # Directory in which the output files will be saved
-			"--quiet",  # Suppress all progress reports on stderr and only report errors
-			"--conf", fastQscreen_config,  # Location of the required configuration file
-			' '.join(mfiltered_data),
-			"2>>", os.path.join(temp, "{0}_fastQscreen_report.txt".format(dirs))])  # Output fastQ screen report 
-			subprocess.run(fastQscreen, shell=True)
-		
-			print(">> 2/5 | fastQC - Quality Control reports are being generated: in progress ..")
-			fastQC = ' '.join([
-			"fastqc",  # Call fastQC to quality control all processed data
-			"--threads", args.threads,  # Number of threads to use
-			"--quiet",  # Print only log warnings
-			"--outdir", temp,  # Create all output files in this specified output directory
-			' '.join(mfiltered_data),  # String containing all samples that are about to be checked
-			"2>>", os.path.join(temp, "{0}_fastQC_init_report.txt".format(dirs))])  # Output fastQC report
-			subprocess.run(fastQC, shell=True)
+				print(">> {0} 1/5 | fastQscreen - Checking random reads for possible contamination: in progress ..".format(datetime.now().strftime("%d.%m %H:%M")))
+				fastQscreen = ' '.join([
+				"fastq_screen",  # Call fastQ screen to check contamination in the processed data
+				"--threads", args.threads,  # Number of threads to use
+				"--outdir",  temp,  # Directory in which the output files will be saved
+				"--quiet",  # Suppress all progress reports on stderr and only report errors
+				"--conf", fastQscreen_config,  # Location of the required configuration file
+				' '.join(mfiltered_data),
+				"2>>", os.path.join(temp, "{0}_fastQscreen_report.txt".format(dirs))])  # Output fastQ screen report 
+				subprocess.run(fastQscreen, shell=True)
+			
+				print(">> {0} 2/5 | fastQC - Quality Control reports are being generated: in progress ..".format(datetime.now().strftime("%d.%m %H:%M")))
+				fastQC = ' '.join([
+				"fastqc",  # Call fastQC to quality control all processed data
+				"--threads", args.threads,  # Number of threads to use
+				"--quiet",  # Print only log warnings
+				"--outdir", temp,  # Create all output files in this specified output directory
+				' '.join(mfiltered_data),  # String containing all samples that are about to be checked
+				"2>>", os.path.join(temp, "{0}_fastQC_init_report.txt".format(dirs))])  # Output fastQC report
+				subprocess.run(fastQC, shell=True)
 
-			print(">> 3/5 | fastP - Quality Control of all reads: in progress ..")
-			for file in mfiltered_data:
-				sample_name = os.path.basename(file).split(".")[0]
-				fastP = ' '.join([
-				"fastp",  # Call fastQC to quality control all processed data
-				"--thread", args.threads,  # Number of threads to use
-				"--in1", file,  # Input read1 file
-				"--disable_adapter_trimming",  # Adapter trimming is disabled
-				"--disable_trim_poly_g",  # Disable polyG tail trimming
-				"--disable_quality_filtering",  # Quality filtering is disabled
-				"--disable_length_filtering",  # Length filtering is disabled
-				"--overrepresentation_analysis",  # Enable overrepresented sequence analysis
-				"--html", os.path.join(temp, "{0}_fastp.html".format(sample_name)),  # Create ftml file in this specified output directory
-				"--json", os.path.join(temp, "{0}_fastp.json".format(sample_name)),  # Create json output file in this specified output directory
-				"2>>", os.path.join(temp, "{0}_fastP_report.txt".format(sample_name))])  # Output fastP report
-				subprocess.run(fastP, shell=True) 
+				print(">> {0} 3/5 | fastP - Quality Control of all reads: in progress ..".format(datetime.now().strftime("%d.%m %H:%M")))
+				for file in mfiltered_data:
+					sample_name = os.path.basename(file).split(".")[0]
+					fastP = ' '.join([
+					"fastp",  # Call fastQC to quality control all processed data
+					"--thread", args.threads,  # Number of threads to use
+					"--in1", file,  # Input read1 file
+					"--disable_adapter_trimming",  # Adapter trimming is disabled
+					"--disable_trim_poly_g",  # Disable polyG tail trimming
+					"--disable_quality_filtering",  # Quality filtering is disabled
+					"--disable_length_filtering",  # Length filtering is disabled
+					"--overrepresentation_analysis",  # Enable overrepresented sequence analysis
+					"--html", os.path.join(temp, "{0}_fastp.html".format(sample_name)),  # Create ftml file in this specified output directory
+					"--json", os.path.join(temp, "{0}_fastp.json".format(sample_name)),  # Create json output file in this specified output directory
+					"2>>", os.path.join(temp, "{0}_fastP_report.txt".format(sample_name))])  # Output fastP report
+					subprocess.run(fastP, shell=True) 
 
-				# Calling BBDuk to quality trim the data
-				preprocessing_rawdata(file, sample_name)
+					# Calling BBDuk to quality trim the data
+					preprocessing_rawdata(file, sample_name)
 
-			print(">> 4/5 | bbduk - Quality trimming and filtering of all reads: in progress ..")
-			print(">> 5/5 | multiQC - Summing all QC reports: in progress ..")
-			multiQC = " ".join([
-			"/home/stavros/anaconda3/bin/multiqc",  # Call MultiQC
-			"--quiet",  # Print only log warnings
-			"--outdir", temp,  # Create report in the FastQC reports directory
-			"--filename", "{0}_init_summarised_report".format(dirs),  # Name of the output report 
-			temp,  # Directory where all FastQC and Cutadapt reports reside
-			"2>>", os.path.join(temp, "{0}_multiQC_init_report.txt".format(dirs))])  # Output multiQC report
-			subprocess.run(multiQC, shell=True)
+				print(">> {0} 4/5 | bbduk - Quality trimming and filtering of all reads: in progress ..".format(datetime.now().strftime("%d.%m %H:%M")))
+				print(">> {0} 5/5 | multiQC - Summing all QC reports: in progress ..".format(datetime.now().strftime("%d.%m %H:%M")))
+				multiQC = " ".join([
+				"/home/stavros/anaconda3/bin/multiqc",  # Call MultiQC
+				"--quiet",  # Print only log warnings
+				"--outdir", temp,  # Create report in the FastQC reports directory
+				"--filename", "{0}_init_summarised_report".format(dirs),  # Name of the output report 
+				temp,  # Directory where all FastQC and Cutadapt reports reside
+				"2>>", os.path.join(temp, "{0}_multiQC_init_report.txt".format(dirs))])  # Output multiQC report
+				subprocess.run(multiQC, shell=True)
 
 	os.system('mv {0}/* {1}'.format(temp, prereports_dir))
 	for path, subdir, folder in os.walk(prereports_dir):
@@ -158,12 +158,12 @@ def preprocessing_rawdata(file, sample_name):
 	return
 
 def aligning():
-	print("\nALIGNING AGAINST THE REFERENCE GENOME (GenCode.v31)")
+	print("\n{0}ALIGNING AGAINST THE REFERENCE GENOME (GenCode.v31)".format(datetime.now().strftime("%d.%m %H:%M")))
 	if not os.path.exists(alignment_dir): os.makedirs(alignment_dir)
 	preprocesed_data = glob.glob("{0}/*.qt.fastq.gz".format(preprocesed_dir))
 	
 
-	print(">> 1/1 | minimap2 - aligning in total {0} samples against the reference genome: in progress ..".format(len(preprocesed_data)))
+	print(">> {0} 1/1 | minimap2 - aligning in total {0} samples against the reference genome: in progress ..".format(datetime.now().strftime("%d.%m %H:%M"), len(preprocesed_data)))
 	for i, file in enumerate(preprocesed_data, 1):
 		file_name = os.path.basename(file).split(".")[0]
 		minimap2_genome = " ".join([
@@ -187,12 +187,12 @@ def aligning():
 	return 
 
 def mapping_qc():
-	print("\nMAPPING QUALITY CONTROL AND METRICS")
+	print("\n{0} MAPPING QUALITY CONTROL AND METRICS".format(datetime.now().strftime("%d.%m %H:%M")))
 	if not os.path.exists(postreports_dir): os.makedirs(postreports_dir)
 	aligned_data = glob.glob("{0}/*.qt.genome.bam".format(alignment_dir))
 
 
-	print(">> 1/3 | fastQC - Alignment Quality Control reports are being generated: in progress ..")
+	print(">> {0} 1/3 | fastQC - Alignment Quality Control reports are being generated: in progress ..".format(datetime.now().strftime("%d.%m %H:%M")))
 	fastQC_align = ' '.join([
 	"fastqc",  # Call fastQC to quality control all processed data
 	"--threads", args.threads,  # Number of threads to use
@@ -202,7 +202,7 @@ def mapping_qc():
 	"2>>", os.path.join(temp, "fastQC_alignment_report.txt")])  # Output fastQC report
 	subprocess.run(fastQC_align, shell=True)
 
-	print(">> 2/3 | Picard & RSeQC - removing duplicates and generating post-alignment stats: in progress ..")
+	print(">> {0} 2/3 | Picard & RSeQC - removing duplicates and generating post-alignment stats: in progress ..".format(datetime.now().strftime("%d.%m %H:%M"),))
 	for i, file in enumerate(aligned_data, 1):
 		file_name = os.path.basename(file).split(".")[0]
 		# Removing duplicate reads
@@ -252,7 +252,7 @@ def mapping_qc():
 		subprocess.run(CollectAlignmentSummaryMetrics, shell=True) 
 		os.system('rm {0}'.format(file))
 	
-	print(">> 3/3 | multiQC - Summing all QC reports: in progress ..")
+	print(">> {0} 3/3 | multiQC - Summing all QC reports: in progress ..".format(datetime.now().strftime("%d.%m %H:%M")))
 	multiQC = " ".join([
 	"multiqc",  # Call MultiQC
 	"--quiet",  # Print only log warnings
@@ -277,7 +277,7 @@ def mapping_qc():
 
 def post_processing():
 	# time.sleep(10)
-	print("\nPOST-PROCESSING AND PREPARING DATA FOR VARIANT CALLING")
+	print("\n{0} POST-PROCESSING AND PREPARING DATA FOR VARIANT CALLING".format(datetime.now().strftime("%d.%m %H:%M")))
 	if not os.path.exists(postprocesed_dir): os.makedirs(postprocesed_dir)
 	data = glob.glob("{0}/*.rdqt.genome.bam".format(alignment_dir))
 	list_of_aligned = ' '.join(["--input_file " + files for files in data])
@@ -300,7 +300,7 @@ def post_processing():
 		"2>>", os.path.join(temp, "samtools_idx_report.txt")])  # Output report
 		subprocess.run(ref_idx, shell=True)
 	
-	print(">> 1/6 | gatk RealignerTargetCreator - Define intervals to target for local realignment: in progress ..")
+	print(">> {0} 1/6 | gatk RealignerTargetCreator - Define intervals to target for local realignment: in progress ..".format(datetime.now().strftime("%d.%m %H:%M")))
 	known_indels = [f for f in glob.glob("{0}/*indels*.vcf".format(gatk_known_sites))]
 	## IDefine intervals to target for local realignment
 	realignerTargetCreator = " ".join([
@@ -315,7 +315,7 @@ def post_processing():
 	subprocess.run(realignerTargetCreator, shell=True)
 
 	
-	print(">> 2/6 | gatk IndelRealigner - Base Quality Score Recalibration: in progress ..")
+	print(">> {0} 2/6 | gatk IndelRealigner - Base Quality Score Recalibration: in progress ..".format(datetime.now().strftime("%d.%m %H:%M")))
 	# InDel realignemnt
 	indelRealigner = " ".join([
 	gatk3_8, "--analysis_type IndelRealigner",  # 
@@ -335,7 +335,7 @@ def post_processing():
 	for i, file in enumerate(real_data, 1):
 		file_name = os.path.basename(file).split(".")[0]
 		# Phred score recalibration
-		if i==1:print(">> 3/6 | gatk BaseRecalibrator 1 - Base Quality Score Recalibration: in progress ..")
+		if i==1:print(">> {0} 3/6 | gatk BaseRecalibrator 1 - Base Quality Score Recalibration: in progress ..".format(datetime.now().strftime("%d.%m %H:%M")))
 		preBaseRecalibrator = " ".join([
 		"gatk BaseRecalibrator",  # Call gatk BaseRecalibrator (v4.1.2.0)
 		"--input", file,
@@ -349,7 +349,7 @@ def post_processing():
 		subprocess.run(preBaseRecalibrator, shell=True)
 
 		# Generation of the recalibrated reads
-		if i==1:print(">> 4/6 | gatk applyBQSR - Generation of the recalibrated reads: in progress ..")
+		if i==1:print(">> {0} 4/6 | gatk applyBQSR - Generation of the recalibrated reads: in progress ..".format(datetime.now().strftime("%d.%m %H:%M")))
 		applyBQSR = " ".join([
 		"gatk ApplyBQSR",  # Call gatk ApplyBQSR (v4.1.2.0)
 		"--intervals", gatk_wg_intervals,
@@ -360,7 +360,7 @@ def post_processing():
 		subprocess.run(applyBQSR, shell=True)
 
 		# Phred score recalibration
-		if i==1:print(">> 5/6 | gatk BaseRecalibrator 2 - Base Quality Score Recalibration: in progress ..")
+		if i==1:print(">> {0} 5/6 | gatk BaseRecalibrator 2 - Base Quality Score Recalibration: in progress ..".format(datetime.now().strftime("%d.%m %H:%M")))
 		afterBaseRecalibrator = " ".join([
 		"gatk BaseRecalibrator",  # Call gatk BaseRecalibrator (v4.1.2.0)
 		"--reference", refGenome_GRCh38,
@@ -374,7 +374,7 @@ def post_processing():
 		subprocess.run(afterBaseRecalibrator, shell=True)
 
 		# Evaluate and compare base quality score recalibration (BQSR) tables
-		if i==1:print(">> 6/6 | gatk AnalyzeCovariates - Evaluate and compare base quality score recalibration: in progress ..")
+		if i==1:print(">> {0} 6/6 | gatk AnalyzeCovariates - Evaluate and compare base quality score recalibration: in progress ..".format(datetime.now().strftime("%d.%m %H:%M")))
 		analyzeCovariates = " ".join([
 		"gatk AnalyzeCovariates",  # Call gatk ApplyBQSR (v4.1.2.0)
 		"--before-report-file", "{0}/{1}_recal_data.table".format(postprocesed_dir, file_name),
@@ -387,21 +387,22 @@ def post_processing():
 	return
 
 def calling_variants():
-	print("\nCALLING VARIANTS")
+	print("\n{0} CALLING VARIANTS".format(datetime.now().strftime("%d.%m %H:%M")))
+
 	if not os.path.exists(varcall_dir): os.makedirs(varcall_dir)
 	calibrated_data = glob.glob("{0}/*.real.recal.bam".format(postprocesed_dir))
 	sample_list = os.path.join(varcall_dir, "sample_list.txt")
 	
 	# Creating sample list that is needed from VarScan2
-	if not os.path.exists(sample_list):
-		with open(sample_list, "w") as fout: 
-			for items in calibrated_data:
-				fout.write("{0}\n".format(os.path.basename(items).split(".")[0]))
+	# if not os.path.exists(sample_list):
+	with open(sample_list, "w") as fout: 
+		for items in calibrated_data:
+			fout.write("{0}\n".format(os.path.basename(items).split(".")[0]))
 
 
 	### CALL CANDIDATE VARIANTS
 	## 1. Run freebayes to call variants
-	print(">> 1/4 | freebayes - Call somatic SNVs and indels: in progress ..")
+	print(">> {0} 1/4 | freebayes - Call somatic SNVs and indels: in progress ..".format(datetime.now().strftime("%d.%m %H:%M")))
 	freebayes = " ".join([
 	"freebayes",
 	"--bam", ' '.join(calibrated_data),
@@ -414,7 +415,7 @@ def calling_variants():
 
 
 	## 2. Run VarScan2 to call variants
-	print(">> 2/4 | VarScan2 - Call somatic SNVs and indels: in progress ..")
+	print(">> {0} 2/4 | VarScan2 - Call somatic SNVs and indels: in progress ..".format(datetime.now().strftime("%d.%m %H:%M")))
 	varscan2 = " ".join([
 	"samtools mpileup",  # Converting BAM input to vcf
 	"--redo-BAQ",  # Recalculate BAQ on the fly
@@ -433,7 +434,7 @@ def calling_variants():
 
 
 	## 3. Run Mutect2 to call variants
-	print(">> 3/4 | Mutect2 - Call somatic SNVs and indels via local assembly of haplotypes: in progress ..")
+	print(">> {0} 3/4 | Mutect2 - Call somatic SNVs and indels via local assembly of haplotypes: in progress ..".format(datetime.now().strftime("%d.%m %H:%M")))
 	list_of_aligned = ' '.join(["--input " + files for files in calibrated_data])
 	mutect2 = " ".join([
 	"gatk Mutect2",
@@ -455,10 +456,11 @@ def calling_variants():
 
 	## 4. Create intersections, unions and complements of the VCF files
 	if not os.path.exists(intersection_analysis): os.makedirs(intersection_analysis)
-	print(">> 4/4 | StarFish - Generating the intersections of the VCF files: in progress ..")
-	intersecvcfs = " ".join([
+	print(">> {0} 4/4 | StarFish - Generating the intersections of the VCF files: in progress ..".format(datetime.now().strftime("%d.%m %H:%M")))
+	intersecvcfs = " ".cjoin([
 	starfish,  # Calling starfish
 	"--rtg rtg",
+	"--all_records",  # Intersect all records
 	"--threads", args.threads,
 	"--sdf", refGenome_GRCh38sdf,
 	"--output", intersection_analysis,
@@ -471,13 +473,13 @@ def calling_variants():
 	return
 
 def stats_n_annotation():
-	print("\nEXPORTING STATS, FILTERING & ANNOTATING THE VARIANTS")
+	print("\n{0} EXPORTING STATS, FILTERING & ANNOTATING THE VARIANTS".format(datetime.now().strftime("%d.%m %H:%M")))
 	if not os.path.exists(prefilter_plots): os.makedirs(prefilter_plots)
 	if not os.path.exists(filtered_plots): os.makedirs(filtered_plots)
 	
 	### STATS AND FILTERING STEPS
 	## 1. Exporting stats of the called variants
-	print("1/8 | rtg stats - Exporting stats of the called variants: in progress ..")
+	print(">> {0} 1/8 | rtg stats - Exporting stats of the called variants: in progress ..".format(datetime.now().strftime("%d.%m %H:%M")))
 	rtg_stats = " ".join([
 	"rtg vcfstats",
 	"{0}/ABC.vcf.gz".format(intersection_analysis),
@@ -485,7 +487,7 @@ def stats_n_annotation():
 	"2>>", os.path.join(postreports_dir, "rtg_stats_report.txt")])
 	subprocess.run(rtg_stats, shell=True)
 
-	print("2/8 | Bcftools stats - Exporting stats of the called variants: in progress ..")
+	print(">> {0} 2/8 | Bcftools stats - Exporting stats of the called variants: in progress ..".format(datetime.now().strftime("%d.%m %H:%M")))
 	bcftools_stats = " ".join([
 	"bcftools stats",
 	"--samples -",  # list of samples for sample stats (include all)
@@ -495,7 +497,7 @@ def stats_n_annotation():
 	"2>>", os.path.join(postreports_dir, "bcftools_stats_report.txt")])
 	subprocess.run(bcftools_stats, shell=True)
 
-	print("3/8 | Plot vcfstats - Exporting plots based on the stats of the called variants: in progress ..")
+	print(">> {0} 3/8 | Plot vcfstats - Exporting plots based on the stats of the called variants: in progress ..".format(datetime.now().strftime("%d.%m %H:%M")))
 	plot_vcfstats = " ".join([
 	"plot-vcfstats",
 	"--prefix", prefilter_plots,
@@ -504,7 +506,7 @@ def stats_n_annotation():
 	subprocess.run(plot_vcfstats, shell=True)
 	
 	## 2. Filtering variants
-	print("4/8 | Bcftools filter - Applying several filters to the called variants: in progress ..")
+	print(">> {0} 4/8 | Bcftools filter - Applying several filters to the called variants: in progress ..".format(datetime.now().strftime("%d.%m %H:%M")))
 	bcftools_filter = " ".join([
 	"bcftools filter",
 	"--output-type z",
@@ -519,7 +521,7 @@ def stats_n_annotation():
 	subprocess.run("tabix -p vcf {0}/filtered_variants.vcf.gz".format(varcall_dir), shell=True) 
 
 	## 4. Exporting stats of the filtered variants
-	print("5/8 | rtg stats - Exporting stats of the filtered variants: in progress ..")
+	print(">> {0} 5/8 | rtg stats - Exporting stats of the filtered variants: in progress ..".format(datetime.now().strftime("%d.%m %H:%M")))
 	filt_rtg_stats = " ".join([
 	"rtg vcfstats",
 	"{0}/filtered_variants.vcf.gz".format(varcall_dir),
@@ -527,7 +529,7 @@ def stats_n_annotation():
 	"2>>", os.path.join(postreports_dir, "rtg_stats_filtered_report.txt")])
 	subprocess.run(filt_rtg_stats, shell=True)
 
-	print("6/8 | Bcftools stats - Exporting stats of the filtered variants: in progress ..")
+	print(">> {0} 6/8 | Bcftools stats - Exporting stats of the filtered variants: in progress ..".format(datetime.now().strftime("%d.%m %H:%M")))
 	filt_bcftools_stats = " ".join([
 	"bcftools stats",
 	"--samples -",  # list of samples for sample stats (include all)
@@ -537,7 +539,7 @@ def stats_n_annotation():
 	"2>>", os.path.join(postreports_dir, "bcftools_stats_filtered_report.txt")])
 	subprocess.run(filt_bcftools_stats, shell=True)
 
-	print("7/8 | Plot vcfstats - Exporting plots based on the stats of the filtered variants: in progress ..")
+	print(">> {0} 7/8 | Plot vcfstats - Exporting plots based on the stats of the filtered variants: in progress ..".format(datetime.now().strftime("%d.%m %H:%M")))
 	filt_plot_vcfstats = " ".join([
 	"plot-vcfstats",
 	"--prefix", filtered_plots,
@@ -549,7 +551,7 @@ def stats_n_annotation():
 	## 5. Adding information to the discovered variants
 	## At this step we run tools to add information to the discovered variants in our dataset.
 	## One of those tools, Funcotator, can be used to add gene-level information to each variant.
-	print("8/8 | Funcotator - Adding information to the discovered variants in our dataset: in progress ..")
+	print(">> {0} 8/8 | Funcotator - Adding information to the discovered variants in our dataset: in progress ..".format(datetime.now().strftime("%d.%m %H:%M")))
 	funcotator = " ".join([
 	"gatk Funcotator",
 	"--ref-version hg38",
@@ -565,16 +567,17 @@ def stats_n_annotation():
 def main():
 	
 
-	quality_control()
+	# quality_control()
 	
-	aligning()
+	# aligning()
 
-	post_processing()
+	# post_processing()
 
 	calling_variants()
 
-	# stats_n_annotation()
+	stats_n_annotation()
 
 
 	## CHECK FOR "WARN" IN EVERY REPORT file! and print
+
 if __name__ == "__main__": main()
