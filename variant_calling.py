@@ -562,10 +562,18 @@ def stats_n_annotation():
 	"--data-sources-path", gatk_functional_annot,
 	"2>>", os.path.join(postreports_dir, "functional_annotator_report.txt")])
 	subprocess.run(funcotator, shell=True)
+	finalise()
 	return
 
-def finilise():
+def finalise():
 
+	os.system('rm -r {0}'.format(temp))  # Removing temp directory
+	# Remove unnecessary files
+	for path, subdir, folder in os.walk(analysis_dir):
+		for name in folder:
+			file = os.path.join(path, name)
+			if os.stat(file).st_size == 0 or name.endswith(".bai"):
+				os.remove(file)
 	return
 
 def main():
