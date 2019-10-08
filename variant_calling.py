@@ -457,7 +457,7 @@ def calling_variants():
 	## 4. Create intersections, unions and complements of the VCF files
 	if not os.path.exists(intersection_analysis): os.makedirs(intersection_analysis)
 	print(">> {0} 4/4 | StarFish - Generating the intersections of the VCF files: in progress ..".format(datetime.now().strftime("%d.%m %H:%M")))
-	intersecvcfs = " ".cjoin([
+	intersecvcfs = " ".join([
 	starfish,  # Calling starfish
 	"--rtg rtg",
 	"--all_records",  # Intersect all records
@@ -564,14 +564,18 @@ def stats_n_annotation():
 	subprocess.run(funcotator, shell=True)
 	return
 
+def finilise():
+
+	return
+
 def main():
 	
 
-	# quality_control()
+	quality_control()
 	
-	# aligning()
+	aligning()
 
-	# post_processing()
+	post_processing()
 
 	calling_variants()
 
